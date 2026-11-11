@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>たまごをぬすむ オンライン</title>
+  <script src="https://jsdelivr.net"></script>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #fff; margin: 0; padding: 20px; text-align: center; }
+    .container { max-width: 800px; margin: 0 auto; background: #16213e; padding: 20px; border-radius: 15px; box-shadow: 0 8px 20px rgba(0,0,0,0.5); }
+    h1 { color: #f8b400; margin-bottom: 5px; }
+    .event-banner { background: linear-gradient(90deg, #ff007f, #ff8c00); padding: 12px; border-radius: 10px; font-weight: bold; font-size: 1.2em; margin: 15px 0; display: none; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.02); } 100% { transform: scale(1); } }
+    input, button { padding: 10px 15px; margin: 5px; border-radius: 8px; border: none; font-size: 1em; }
+    input { background: #0f3460; color: #fff; border: 1px solid #533483; }
+    button { background: #e94560; color: #fff; cursor: pointer; font-weight: bold; transition: 0.2s; }
+    button:hover { background: #ff5e78; transform: translateY(-2px); }
+    .stats { display: flex; justify-content: space-around; background: #0f3460; padding: 15px; border-radius: 10px; margin: 15px 0; font-size: 1.2em; }
+    .section { background: #0f3460; padding: 15px; border-radius: 10px; margin-top: 20px; }
+    .egg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 10px; }
+    .egg-card { background: #1a1a2e; padding: 12px; border-radius: 10px; border: 2px solid #533483; }
+    .egg-icon { font-size: 2.5em; }
+    .admin-panel { background: #2b0918; border: 2px solid #ff007f; padding: 15px; border-radius: 10px; margin-top: 20px; display: none; }
+    .log { font-size: 0.9em; color: #aaa; margin-top: 10px; height: 60px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>🥚 たまごをぬすむ オンライン</h1>
+  <div id="event-banner" class="event-banner"></div>
+
+  <div id="auth-section">
+    <p>アカウント登録またはログインしてゲーム開始！</p>
+    <input type="text" id="username" placeholder="プレイヤー名（新規登録時）"><br>
+    <input type="email" id="email" placeholder="メールアドレス（例: a@test.com）"><br>
+    <input type="password" id="password" placeholder="パスワード（6文字以上）"><br>
+    <button onclick="signUp()">新規登録</button>
+    <button onclick="signIn()" style="background:#00a8cc;">ログイン</button>
+    <p id="auth-msg" style="color:#ff8c00;"></p>
+  </div>
+
+  <div id="game-section" style="display:none;">
+    <div class="stats">
+      <div>👤 <span id="disp-name"></span></div>
+      <div>💰 コイン: <span id="disp-coins">0</span></div>
+      <div>⚡ 秒間収益: +<span id="disp-income">0</span>/秒</div>
+    </div>
+
+    <div class="section">
+      <h3>🕵️ タマゴを盗みに行く！</h3>
+      <p>確率でレアなタマゴが盗めるぞ！（※空きスロットが必要）</p>
+      <button onclick="stealEgg()">🥚 近くの巣から盗む (無料)</button>
+      <button onclick="stealRareEgg()" style="background:#f8b400; color:#000;">👑 厳重な金庫から盗む (500コイン)</button>
+      <div class="log" id="game-log">ゲーム開始！タマゴを盗んで基地に並べよう！</div>
+    </div>
+
+    <div class="section">
+      <h3>🏠 自分の基地（スロット: <span id="disp-slots">0/3</span>）</h3>
+      <button onclick="upgradeBase()" style="background:#28a745;">🔨 基地を拡張する (<span id="upgrade-cost">300</span>コイン)</button>
+      <div class="egg-grid" id="egg-grid"></div>
+    </div>
+
+    <div id="admin-panel" class="admin-panel">
+      <h3>👑 管理者イベントパネル (Admin Control)</h3>
+      <p>全プレイヤーの画面にリアルタイムでイベントを発動します！</p>
+      <button onclick="triggerEvent('gold_rush', '🌟【管理者イベント】ゴールデンラッシュ発動！全収益が10倍！', 10)">🌟 収益10倍ラッシュ</button>
+      <button onclick="triggerEvent('rainbow_egg', '🌈【管理者イベント】虹のタマゴが出現中！今すぐ盗め！', 3)">🌈 虹タマゴ出現(3倍)</button>
+      <button onclick="triggerEvent('none', '', 1)" style="background:#555;">🛑 イベント終了</button>
+    </div>
+
+    <br>
+    <button onclick="saveData()" style="background:#533483;">💾 手動セーブ</button>
+    <button onclick="signOut()" style="background:#444;">ログアウト</button>
+  </div>
+</div>
+
+<script>
+  // ★ここにあなたのSupabaseの情報を貼り付けてください★
+  const SUPABASE_URL = 'ここにProject_URLを貼る';
+  const SUPABASE_KEY = 'ここにanonキーを貼る';
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  let loggedInUser = null;
+  let profile = { username: '', coins: 100, base_slots: 3, eggs: [], is_admin: false };
+  let eventMultiplier = 1;
+  let currentEventType = 'none';
+
+  const EGG_TYPES = [
+    { name: 'ふつうのタマゴ', icon: '🥚', income: 2 },
+    { name: '金のタマゴ', icon: '🥇', income: 15 },
+    { name: 'ダイヤのタマゴ', icon: '💎', income: 80 },
+    { name: 'ギャラクシーエッグ', icon: '🌌', income: 400 },
+    { name: '【限定】レインボーエッグ', icon: '🌈', income: 2000 }
+  ];
+
+  async function signUp() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const username = document.getElementById('username').value || '名無しプレイヤー';
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) { document.getElementById('auth-msg').innerText = 'エラー: ' + error.message; return; }
+    
+    await supabase.from('profiles').insert([{
+      id: data.user.id, username: username, coins: 100, base_slots: 3, eggs: [], is_admin: false
+    }]);
+    document.getElementById('auth-msg').innerText = '登録完了！ログインボタンを押してください。';
+  }
+
+  async function signIn() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) { document.getElementById('auth-msg').innerText = 'ログイン失敗: ' + error.message; return; }
+    loggedInUser = data.user;
+    loadGame();
+  }
+
+  async function signOut() {
+    await saveData();
+    await supabase.auth.signOut();
+    location.reload();
+  }
+
+  async function loadGame() {
+    const { data } = await supabase.from('profiles').select('*').eq('id', loggedInUser.id).single();
+    if (data) {
+      profile = data;
+      const lastSeen = new Date(profile.last_seen);
+      const now = new Date();
+      const diffSec = Math.floor((now - lastSeen) / 1000);
+      const baseIncome = calcTotalIncome();
+      if (diffSec > 10 && baseIncome > 0) {
+        const offlineEarned = Math.min(diffSec, 3600 * 8) * baseIncome;
+        profile.coins += offlineEarned;
+        addLog('💤 放置していた ' + diffSec + '秒 の間に ' + offlineEarned + ' コイン稼ぎました！');
+      }
+    }
+
+    document.getElementById('auth-section').style.display = 'none';
+    document.getElementById('game-section').style.display = 'block';
+    if (profile.is_admin) {
+      document.getElementById('admin-panel').style.display = 'block';
+    }
+
+    setupRealtimeEvents();
+    updateUI();
+  }
+
+  async function setupRealtimeEvents() {
+    const { data } = await supabase.from('admin_events').select('*').eq('id', 1).single();
+    if (data) applyAdminEvent(data);
+
+    supabase.channel('admin_events_channel')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'admin_events' }, payload => {
+        applyAdminEvent(payload.new);
+      })
+      .subscribe();
+  }
+
+  function applyAdminEvent(ev) {
+    currentEventType = ev.event_type;
+    eventMultiplier = ev.multiplier || 1;
+    const banner = document.getElementById('event-banner');
+    if (ev.event_type !== 'none' && ev.message) {
+      banner.style.display = 'block';
+      banner.innerText = ev.message;
+      addLog(ev.message);
+    } else {
+      banner.style.display = 'none';
+    }
+    updateUI();
+  }
+
+  async function triggerEvent(type, msg, mult) {
+    await supabase.from('admin_events').update({
+      event_type: type, message: msg, multiplier: mult, updated_at: new Date().toISOString()
+    }).eq('id', 1);
+  }
+
+  function stealEgg() {
+    if (profile.eggs.length >= profile.base_slots) {
+      addLog('❌ 基地がいっぱいです！基地を拡張するかタマゴを売ってください。');
+      return;
+    }
+    let rand = Math.random();
+    let egg = EGG_TYPES[0];
+    if (currentEventType === 'rainbow_egg' && rand < 0.3) egg = EGG_TYPES[4];
+    else if (rand < 0.05) egg = EGG_TYPES[2];
+    else if (rand < 0.25) egg = EGG_TYPES[1];
+
+    profile.eggs.push(egg);
+    addLog('🎉 「' + egg.name + '」を盗み出しました！(+' + egg.income + '/秒)');
+    updateUI();
+  }
+
+  function stealRareEgg() {
+    if (profile.coins < 500) { addLog('❌ コインが足りません！(500必要)'); return; }
+    if (profile.eggs.length >= profile.base_slots) { addLog('❌ 基地がいっぱいです！'); return; }
+    profile.coins -= 500;
+    let rand = Math.random();
+    let egg = EGG_TYPES[1];
+    if (currentEventType === 'rainbow_egg' && rand < 0.5) egg = EGG_TYPES[4];
+    else if (rand < 0.15) egg = EGG_TYPES[3];
+    else if (rand < 0.5) egg = EGG_TYPES[2];
+
+    profile.eggs.push(egg);
+    addLog('👑 金庫から「' + egg.name + '」を盗み出しました！(+' + egg.income + '/秒)');
+    updateUI();
+  }
+
+  function sellEgg(index) {
+    const egg = profile.eggs[index];
+    const sellPrice = egg.income * 10;
+    profile.coins += sellPrice;
+    profile.eggs.splice(index, 1);
+    addLog('💰 「' + egg.name + '」を ' + sellPrice + ' コインで売却しました。');
+    updateUI();
+  }
+
+  function upgradeBase() {
+    const cost = profile.base_slots * 100;
+    if (profile.coins < cost) { addLog('❌ コインが足りません！(' + cost + '必要)'); return; }
+    profile.coins -= cost;
+    profile.base_slots += 1;
+    addLog('🔨 基地を拡張しました！最大スロット: ' + profile.base_slots);
+    updateUI();
+  }
+
+  function calcTotalIncome() {
+    return profile.eggs.reduce((sum, e) => sum + e.income, 0) * eventMultiplier;
+  }
+
+  function updateUI() {
+    document.getElementById('disp-name').innerText = profile.username + (profile.is_admin ? ' 👑' : '');
+    document.getElementById('disp-coins').innerText = Math.floor(profile.coins);
+    document.getElementById('disp-income').innerText = calcTotalIncome();
+    document.getElementById('disp-slots').innerText = profile.eggs.length + '/' + profile.base_slots;
+document.getElementById('upgrade-cost').innerText = profile.base_slots * 100;
+const grid = document.getElementById('egg-grid');
+grid.innerHTML = '';
+profile.eggs.forEach((egg, idx) => {
+grid.innerHTML += '' +
+'' + egg.icon + '' +
+'' + egg.name + '' +
+'+' + (egg.income * eventMultiplier) + '/秒' +
+'売る (' + (egg.income * 10) + ')' +
+'';
+});
+}
+function addLog(text) {
+const log = document.getElementById('game-log');
+log.innerHTML = '' + text + '' + log.innerHTML;
+}
+setInterval(() => {
+if (!loggedInUser) return;
+const income = calcTotalIncome();
+if (income > 0) {
+profile.coins += income;
+document.getElementById('disp-coins').innerText = Math.floor(profile.coins);
+}
+}, 1000);
+setInterval(() => {
+if (loggedInUser) saveData();
+}, 15000);
+async function saveData() {
+if (!loggedInUser) return;
+await supabase.from('profiles').update({
+coins: Math.floor(profile.coins),
+base_slots: profile.base_slots,
+eggs: profile.eggs,
+last_seen: new Date().toISOString()
+}).eq('id', loggedInUser.id);
+}
